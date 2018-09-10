@@ -1,0 +1,227 @@
+C51 COMPILER V7.06   _阓_腳拟__口                                                          09/04/2018 21:09:13 PAGE 1   
+
+
+C51 COMPILER V7.06, COMPILATION OF MODULE _阓_腳拟__口
+OBJECT MODULE PLACED IN 宏晶模拟串口.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE 宏晶模拟串口.c BROWSE DEBUG OBJECTEXTEND
+
+stmt level    source
+
+   1          
+   2          
+   3          /*------------------------------------------------------------------*/
+   4          /* --- STC MCU International Limited -------------------------------*/
+   5          /* --- STC 1T Series MCU RC Demo -----------------------------------*/
+   6          /* --- Mobile: (86)13922805190 -------------------------------------*/
+   7          /* --- Fax: 86-0513-55012956,55012947,55012969 ---------------------*/
+   8          /* --- Tel: 86-0513-55012928,55012929,55012966 ---------------------*/
+   9          /* --- Web: www.GXWMCU.com -----------------------------------------*/
+  10          /* --- QQ:  800003751 ----------------------------------------------*/
+  11          /* If you want to use the program or the program referenced in the  */
+  12          /* article, please specify in which data and procedures from STC    */
+  13          /*------------------------------------------------------------------*/
+  14          
+  15          
+  16          
+  17          /*************  本程序功能说明  **************
+  18          
+  19                                          测试说明
+  20          
+  21                  本例程是使用STC系列MCU做的模拟串口。用户根据自己的时钟和波特率自行设置后编译下载。
+  22                  
+  23                  使用串口助手向MCU发送数据，MCU收到后原样返回给PC。
+  24                  
+  25                  本例程使用资源: Timer0中断.
+  26          
+  27          */
+  28          #include "config.h"
+  29          
+  30          /***************************************************************************/
+  31          
+  32          typedef bit BOOL;
+  33          typedef unsigned char   uchar;
+  34          typedef unsigned int    uint;
+  35          
+  36          #define Timer0_Reload           (65536 - MAIN_Fosc / BaudRate / 3)
+  37          #define D_RxBitLenth    9               //9: 8 + 1 stop
+  38          #define D_TxBitLenth    9               //9: 1 stop bit
+  39          
+  40          sbit RXB = P3^1;                //define UART TX/RX port
+  41          sbit TXB = P3^0;
+  42          
+  43          uchar  data TBUF,RBUF;
+  44          uchar  data TDAT,RDAT;
+  45          uchar  data TCNT,RCNT;  //发送和接收检测 计数器(3倍速率检测)
+  46          uchar  data TBIT,RBIT;  //发送和接收的数据计数器
+  47          uchar  data i,r;
+  48          uchar  data buf[3];
+  49          
+  50          bit  TING,RING; //正在发送或接收一个字节
+  51          bit  REND;              //接收完的标志位
+  52          bit  recvStatu;
+  53          
+  54          #define RxBitLenth      9       //8个数据位+1个停止位
+  55          #define TxBitLenth      9       //8个数据位+1个停止位
+C51 COMPILER V7.06   _阓_腳拟__口                                                          09/04/2018 21:09:13 PAGE 2   
+
+  56          
+  57          //-----------------------------------------
+  58          //UART模块的初始变量    initial UART module variable
+  59          void UART_INIT()
+  60          {
+  61   1            TING = 0;
+  62   1            RING = 0;
+  63   1            REND = 0;
+  64   1            TCNT = 0;
+  65   1            RCNT = 0;
+  66   1      }
+  67          
+  68          #define GPIO_Pin_0              0x01    //IO引脚 Px.0
+  69          #define GPIO_Pin_1              0x02    //IO引脚 Px.1
+  70          #define GPIO_Pin_2              0x04    //IO引脚 Px.2
+  71          #define GPIO_Pin_3              0x08    //IO引脚 Px.3
+  72          #define GPIO_Pin_4              0x10    //IO引脚 Px.4
+  73          #define GPIO_Pin_5              0x20    //IO引脚 Px.5
+  74          #define GPIO_Pin_6              0x40    //IO引脚 Px.6
+  75          #define GPIO_Pin_7              0x80    //IO引脚 Px.7
+  76          #define GPIO_Pin_All    0xFF    //IO所有引脚
+  77          
+  78          void main()
+  79          {
+  80   1              InternalRAM_enable();
+  81   1      //      ExternalRAM_enable();
+  82   1      
+  83   1              Timer0_1T();
+  84   1              Timer0_AsTimer();
+  85   1              Timer0_16bitAutoReload();
+  86   1              Timer0_Load(Timer0_Reload);
+  87   1              Timer0_InterruptEnable();
+  88   1              Timer0_Run();
+  89   1              
+  90   1              EA = 1;                                         //打开总中断                                    open global interrupt switch
+  91   1              
+  92   1              //GPIO INIT
+  93   1              P3M1 &= ~0x3c,  P3M0 |=  0x3c;  //推挽输出
+  94   1              P3M1 |= 0x03,   P3M0 &= ~0x03;  //浮空输入
+  95   1              //P3M1 &= ~0x03,        P3M0 &= ~0x03;  //上拉准双向口
+  96   1      
+  97   1              UART_INIT();                            //UART模块的初始变量
+  98   1              
+  99   1              //默认继电器输出为低
+ 100   1              P32 = 0;
+ 101   1              P33 = 0;
+ 102   1              P34 = 0;
+ 103   1              P35 = 0;
+ 104   1              
+ 105   1              while (1) 
+ 106   1              {
+ 107   2                      if (REND)                               //如果接收完,把接收到的值存入接收buff
+ 108   2                      {
+ 109   3                              REND = 0;
+ 110   3                              //buf[r++ & 0x03] = RBUF;
+ 111   3                              
+ 112   3                              
+ 113   3                              // protocol 
+ 114   3                              // head    data1        data2
+ 115   3                              // A5      opcode       cmd
+ 116   3                              // opcode :0x01-relay1, 0x02-relay2, 0x04-relay3,0x08-relay4, 按位或(|)操作可以控制多个IO
+ 117   3                              // relay  :1-P3.2, 2-P3.3, 3-P3.4, 4-P3.5
+C51 COMPILER V7.06   _阓_腳拟__口                                                          09/04/2018 21:09:13 PAGE 3   
+
+ 118   3                      
+ 119   3      #define PROTO_HEAD  (0xA5)              
+ 120   3      #define RELAY1          (0x01)
+ 121   3      #define RELAY2          (0x02)
+ 122   3      #define RELAY3          (0x04)
+ 123   3      #define RELAY4          (0x08)
+ 124   3      #define CMD_ON          (0x01)
+ 125   3      #define CMD_OFF         (0x00)
+ 126   3                                      
+ 127   3                              if(RBUF == PROTO_HEAD)
+ 128   3                              {
+ 129   4                                      recvStatu = 1;
+ 130   4                                      r = 0;
+ 131   4                              }
+ 132   3                              
+ 133   3                              if(recvStatu == 1)
+ 134   3                              {
+ 135   4                                      buf[r++] = RBUF; 
+ 136   4                              }
+ 137   3                              
+ 138   3                              if(r == 3)
+ 139   3                              {
+ 140   4                                      recvStatu = 0;
+ 141   4                                      
+ 142   4                                      if(buf[1] & RELAY1)
+ 143   4                                      {
+ 144   5                                              P32 = buf[2];
+ 145   5                                      }
+ 146   4                                      
+ 147   4                                      if(buf[1] & RELAY2)
+ 148   4                                      {
+ 149   5                                              P33 = buf[2];
+ 150   5                                      }
+ 151   4                                      
+ 152   4                                      if(buf[1] & RELAY3)
+ 153   4                                      {
+ 154   5                                              P34 = buf[2];
+ 155   5                                      }
+ 156   4                                      
+ 157   4                                      if(buf[1] & RELAY4)
+ 158   4                                      {
+ 159   5                                              P35 = buf[2];
+ 160   5                                      }
+ 161   4                              }
+ 162   3                      
+ 163   3                      }
+ 164   2              }
+ 165   1      }
+ 166          
+ 167          
+ 168          //-----------------------------------------
+ 169          //定时器0中断程序for UART 以波特率3倍的速度采样判断 开始位              Timer interrupt routine for UART
+ 170          void tm0(void) interrupt 1
+ 171          {
+ 172   1              if (RING)
+ 173   1              {
+ 174   2                      if (--RCNT == 0)                                  //接收数据以定时器的1/3来接收
+ 175   2                      {
+ 176   3                              RCNT = 3;                   //重置接收计数器  接收数据以定时器的1/3来接收       reset send baudrate counter
+ 177   3                              if (--RBIT == 0)                          //接收完一帧数据
+ 178   3                              {
+ 179   4                                      RBUF = RDAT;            //存储数据到缓冲区      save the data to RBUF
+C51 COMPILER V7.06   _阓_腳拟__口                                                          09/04/2018 21:09:13 PAGE 4   
+
+ 180   4                                      RING = 0;               //停止接收                      stop receive
+ 181   4                                      REND = 1;               //接收完成标志设置      set receive completed flag
+ 182   4                              }
+ 183   3                              else
+ 184   3                              {
+ 185   4                                      RDAT >>= 1;                       //把接收的单b数据 暂存到 RDAT(接收缓冲)
+ 186   4                                      if (RXB) RDAT |= 0x80;  //shift RX data to RX buffer
+ 187   4                              }
+ 188   3                      }
+ 189   2              }
+ 190   1      
+ 191   1              else if (!RXB)          //判断是不是开始位 RXB=0;
+ 192   1              {
+ 193   2                      RING = 1;       //如果是则设置开始接收标志位    set start receive flag
+ 194   2                      RCNT = 4;       //初始化接收波特率计数器        initial receive baudrate counter
+ 195   2                      RBIT = RxBitLenth;       //初始化接收的数据位数(8个数据位+1个停止位)    initial receive bit number (8 da
+             -ta bits + 1 stop bit)
+ 196   2              }
+ 197   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    198    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     13    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      4    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
